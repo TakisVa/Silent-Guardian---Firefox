@@ -6,26 +6,29 @@ document.addEventListener("DOMContentLoaded", () => {
   const statusEl = $("status");
 
   const cleanBtn = $("cleanNow");
-  const smartBtn = $("smartBtn");
-  const bulkBtn = $("bulkBtn");
+  const smartBtn = $("smartProtection");
+  const bulkBtn = $("bulkOptOut");
 
   function formatDate(ts) {
     if (!ts) return "Never";
+
     const d = new Date(ts);
-     return d.toLocaleString("en-GB", { // "en-GB" = day/month/year
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false // για 24ωρη μορφή
+    return d.toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
     });
   }
 
   function setStatus(active) {
     if (!statusEl) return;
+
     statusEl.textContent = active ? "● Active" : "● Inactive";
-    statusEl.style.color = active ? "green" : "red";
+    statusEl.classList.toggle("active", active);
+    statusEl.classList.toggle("inactive", !active);
   }
 
   async function refresh() {
@@ -35,20 +38,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (lastCleanEl) lastCleanEl.textContent = formatDate(data.lastClean);
       if (cookiesClearedEl) cookiesClearedEl.textContent = data.cookiesCleared ?? 0;
-      setStatus(data.active);
-    } catch {
+      setStatus(!!data.active);
+    } catch (e) {
       setStatus(false);
     }
   }
 
   async function act(type) {
-    await chrome.runtime.sendMessage({ type });
+    try {
+      await chrome.runtime.sendMessage({ type });
+    } catch {}
     await refresh();
   }
 
-  if (cleanBtn) cleanBtn.addEventListener("click", () => act("CLEAN_NOW"));
-  if (smartBtn) smartBtn.addEventListener("click", () => act("SMART_PROTECTION"));
-  if (bulkBtn) bulkBtn.addEventListener("click", () => act("BULK_OPT_OUT"));
+  cleanBtn?.addEventListener("click", () => act("CLEAN_NOW"));
+  smartBtn?.addEventListener("click", () => act("SMART_PROTECTION"));
+  bulkBtn?.addEventListener("click", () => act("BULK_OPT_OUT"));
 
   refresh();
 });
