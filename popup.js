@@ -4,6 +4,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const lastCleanEl = $("lastClean");
   const cookiesClearedEl = $("cookiesCleared");
   const statusEl = $("status");
+  const premiumStatusEl = $("premiumStatus");  // New
+  const upgradeBtn = $("upgradeBtn");  // New
 
   const cleanBtn = $("cleanNow");
   const smartBtn = $("smartProtection");
@@ -23,37 +25,63 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function setStatus(active) {
+  function setStatus(active, isPremium) {
     if (!statusEl) return;
 
-    statusEl.textContent = active ? "● Active" : "● Inactive";
+    let text = active ? "● Active" : "● Inactive";
+    if (!isPremium) text += " (Free)";
+    statusEl.textContent = text;
     statusEl.classList.toggle("active", active);
     statusEl.classList.toggle("inactive", !active);
   }
 
   async function refresh() {
     try {
-      const data = await chrome.runtime.sendMessage({ type: "GET_STATUS" });
-      if (!data) return;
+      const data = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+      if (!data || !data.state) return;
 
-      if (lastCleanEl) lastCleanEl.textContent = formatDate(data.lastClean);
-      if (cookiesClearedEl) cookiesClearedEl.textContent = data.cookiesCleared ?? 0;
-      setStatus(!!data.active);
+      if (lastCleanEl) lastCleanEl.textContent = formatDate(data.state.lastClean);
+      if (cookiesClearedEl) cookiesClearedEl.textContent = data.state.cookiesCleared ?? 0;
+      setStatus(!!data.state.active, !!data.state.isPremium);
+
+      // Premium UI
+      if (premiumStatusEl) {
+        premiumStatusEl.textContent = data.state.isPremium ? "Premium Active" : "Free Version";
+      }
+
+      if (bulkBtn) {
+        if (!data.state.isPremium) {
+          bulkBtn.disabled = true;
+          bulkBtn.title = "Premium Feature - Upgrade required";
+        } else {
+          bulkBtn.disabled = false;
+          bulkBtn.title = "";
+        }
+      }
+
+      if (data.state.lastError) {
+        alert(`Error: ${data.state.lastError}`);
+      }
     } catch (e) {
-      setStatus(false);
+      setStatus(false, false);
+      alert("Failed to connect: " + e.message);
     }
   }
 
   async function act(type) {
     try {
-      await chrome.runtime.sendMessage({ type });
-    } catch {}
+      const res = await chrome.runtime.sendMessage({ type });
+      if (res.error) alert(`Action failed: ${res.error}`);
+    } catch (e) {
+      alert(`Action failed: ${e.message}`);
+    }
     await refresh();
   }
 
   cleanBtn?.addEventListener("click", () => act("CLEAN_NOW"));
   smartBtn?.addEventListener("click", () => act("SMART_PROTECTION"));
   bulkBtn?.addEventListener("click", () => act("BULK_OPT_OUT"));
+  upgradeBtn?.addEventListener("click", () => act("UPGRADE_PREMIUM"));  // New
 
   refresh();
 });

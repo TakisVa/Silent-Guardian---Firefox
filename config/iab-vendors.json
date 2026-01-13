@@ -1,6 +1,4 @@
-{
-  "vendors": [
-    "VendorA",
-    "VendorB"
-  ]
-}
+[
+  {"id": "1", "name": "Google Advertising Products", "purposes": ["advertising"]},
+  {"id": "2", "name": "Facebook", "purposes": ["tracking"]}
+]

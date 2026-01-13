@@ -1,5 +1,5 @@
 {
   "genericCMP": {
-    "rejectButtonSelector": ".cmp-reject-button"
+    "rejectButtonSelector": ".ot-pc-refuse-all-handler, .cmp-reject-all, #reject-cookies"
   }
 }

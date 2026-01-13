@@ -1,9 +1,10 @@
 {
   "free": {
-    "ads": ["doubleclick.net", "taboola.com"],
-    "tracking": ["trackingdomain.com"]
+    "ads": ["doubleclick.net", "adnxs.com"],
+    "tracking": ["google-analytics.com", "facebook.net"]
   },
   "premium": {
-    "trackers": ["advancedtracker.com", "analyticsvendor.com"]
+    "trackers": ["scorecardresearch.com", "krxd.net"],
+    "analytics": ["mixpanel.com", "hotjar.com"]
   }
 }
