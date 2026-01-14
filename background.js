@@ -4,83 +4,94 @@ let state = {
   lastClean: null,
   lastError: null,
   active: false,
-  isPremium: false  // Premium status (placeholder: set to true for testing)
+  isPremium: false
 };
 
 let whitelist = [];
 let blacklist = [];
 
-// Default auto-whitelist for common functional sites (e.g. login-heavy)
-const defaultWhitelist = ['google.com', 'hubspot.com', 'amazon.com', 'facebook.com'];  // Add more as needed
+// Default auto-whitelist
+const defaultWhitelist = ['google.com', 'amazon.com', 'facebook.com', 'hubspot.com'];
 
 // ---------- CONFIG LOADING ----------
 async function loadConfigs() {
-  const response = await fetch(chrome.runtime.getURL('config/cookie-categories.json'));
-  const categories = await response.json();
-  const freeBlacklist = [...(categories.free.ads || []), ...(categories.free.tracking || [])];
-  blacklist = [...new Set([...blacklist, ...freeBlacklist])];
+  try {
+    const response = await fetch(chrome.runtime.getURL('config/cookie-categories.json'));
+    const categories = await response.json();
+    const freeBlacklist = [...(categories.free.ads || []), ...(categories.free.tracking || [])];
+    blacklist = [...new Set([...blacklist, ...freeBlacklist])];
 
-  if (state.isPremium) {
-    const premiumBlacklist = [...(categories.premium.trackers || []), ...(categories.premium.analytics || [])];
-    blacklist = [...new Set([...blacklist, ...premiumBlacklist])];
+    if (state.isPremium) {
+      const premiumBlacklist = [...(categories.premium.trackers || []), ...(categories.premium.analytics || [])];
+      blacklist = [...new Set([...blacklist, ...premiumBlacklist])];
+    }
+  } catch (e) {
+    console.error("Config load error:", e);
   }
 }
 
 // ---------- STORAGE ----------
 async function loadState() {
-  const data = await chrome.storage.local.get([
-    "state",
-    "whitelist",
-    "blacklist"
-  ]);
+  try {
+    const storedData = await chrome.storage.local.get(["state", "whitelist", "blacklist"]);
+    console.log("Loaded storage data:", storedData);
 
-  if (data.state) state = data.state;
-  whitelist = data.whitelist || [...defaultWhitelist];  // Auto-add defaults
-  blacklist = data.blacklist || [];
+    const data = storedData || {};
 
-  await loadConfigs();  // Append config blacklist
+    if (data.state) state = data.state;
+    whitelist = data.whitelist || [...defaultWhitelist];
+    blacklist = data.blacklist || [];
+
+    await loadConfigs();
+  } catch (e) {
+    console.error("Storage load error:", e);
+    whitelist = [...defaultWhitelist];
+    blacklist = [];
+  }
 }
 
 function saveState() {
-  chrome.storage.local.set({ state });
+  chrome.storage.local.set({ state }).catch(e => console.error("Save state error:", e));
 }
 
 function saveLists() {
-  chrome.storage.local.set({ whitelist, blacklist });
+  chrome.storage.local.set({ whitelist, blacklist }).catch(e => console.error("Save lists error:", e));
 }
 
 // ---------- VALIDATION ----------
 function validateDomain(domain) {
-  const tldRegex = /\.(com|net|org|io|co|uk|de|fr|gr|eu|app|site)$/i;  // Basic TLD check
-  return /^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(domain) && tldRegex.test(domain) && domain !== 'localhost';
+  domain = domain.toLowerCase();
+  const tldRegex = /\.(com|net|org|io|co|uk|de|fr|gr|eu|app|site|ai|dev|biz|info)$/i;  // Expanded TLDs
+  const isValid = /^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(domain) && tldRegex.test(domain) && domain !== 'localhost';
+  console.log("Validate domain:", domain, "Result:", isValid);
+  return isValid;
 }
 
 // ---------- CLEAN LOGIC ----------
 async function cleanCookies() {
+  console.log("Starting cleanCookies...");
   try {
     const cookies = await chrome.cookies.getAll({});
+    console.log("Fetched cookies:", cookies.length);
+
     let removed = 0;
 
     for (const cookie of cookies) {
       let shouldDelete = false;
 
-      const domain = cookie.domain.replace(/^\./, "");
+      const domain = cookie.domain.replace(/^\./, "").toLowerCase();
 
-      // Whitelist: NEVER delete
       if (whitelist.some(w => domain.endsWith(w))) continue;
 
-      // Blacklist: ALWAYS delete
       if (blacklist.some(b => domain.endsWith(b))) {
         shouldDelete = true;
       }
 
-      // Heuristics for non-useful cookies
       if (!shouldDelete) {
         if (cookie.hostOnly) continue;
         if (cookie.sameSite !== "no_restriction") continue;
 
         const nameLower = cookie.name.toLowerCase();
-        // Keep useful: login, session, prefs, cart etc.
         if (
           nameLower.includes("sess") ||
           nameLower.includes("auth") ||
@@ -95,12 +106,11 @@ async function cleanCookies() {
           continue;
         }
 
-        // Premium extra heuristics: e.g. UUID-like tracking values
         if (state.isPremium && cookie.value.match(/^[a-f0-9-]{36}$/i)) {
           shouldDelete = true;
         }
 
-        shouldDelete = true;  // Default to delete if not useful
+        shouldDelete = true;
       }
 
       if (!shouldDelete) continue;
@@ -110,19 +120,18 @@ async function cleanCookies() {
       try {
         await chrome.cookies.remove({ url, name: cookie.name });
         removed++;
-      } catch (_) {}
+        console.log("Removed cookie:", cookie.name, "from", domain);
+      } catch (e) {
+        console.error("Remove error for", cookie.name, ":", e);
+      }
     }
 
     if (removed > 0) {
       state.cookiesCleared += removed;
       state.lastClean = Date.now();
-      // Notification for feedback
-      chrome.notifications.create({
-        type: 'basic',
-        iconUrl: 'icons/icon48.png',
-        title: 'Silent Guardian',
-        message: `Cleared ${removed} tracking cookies!`
-      });
+      // Remove notification - keep silent
+    } else {
+      console.log("No cookies removed.");
     }
 
     state.lastError = null;
@@ -130,6 +139,7 @@ async function cleanCookies() {
 
     return { success: true, removed };
   } catch (e) {
+    console.error("cleanCookies error:", e);
     state.lastError = e.message || "Unknown error";
     saveState();
     return { success: false, error: state.lastError };
@@ -145,20 +155,20 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // ---------- OPT-OUT LOGIC ----------
 async function performBulkOptOut(tabId) {
+  console.log("Starting performBulkOptOut for tab:", tabId);  // Debug
   try {
     const cmpResponse = await fetch(chrome.runtime.getURL('config/cmp-selectors.json'));
     const cmps = await cmpResponse.json();
-    let rejectSelector = cmps.genericCMP.rejectButtonSelector || '.cmp-reject-all';  // Fallback
+    let rejectSelector = cmps.genericCMP.rejectButtonSelector || '.cmp-reject-all';
 
     if (state.isPremium) {
       const vendorsResponse = await fetch(chrome.runtime.getURL('config/iab-vendors.json'));
       const vendors = await vendorsResponse.json();
-      // Premium: Uncheck all non-essential vendors + reject
       await chrome.scripting.executeScript({
         target: { tabId },
         func: (vendorsList, rejectSel) => {
           vendorsList.forEach(v => {
-            if (v.purposes.includes('advertising')) {  // Example filter
+            if (v.purposes.includes('advertising')) {
               const checkbox = document.querySelector(`[data-vendor="${v.id}"] input[type="checkbox"]`);
               if (checkbox && checkbox.checked) checkbox.click();
             }
@@ -171,7 +181,6 @@ async function performBulkOptOut(tabId) {
         args: [vendors, rejectSelector]
       });
     } else {
-      // Free: Simple reject button click
       await chrome.scripting.executeScript({
         target: { tabId },
         func: (selector) => {
@@ -182,7 +191,6 @@ async function performBulkOptOut(tabId) {
       });
     }
 
-    // Notification
     chrome.notifications.create({
       type: 'basic',
       iconUrl: 'icons/icon48.png',
@@ -192,6 +200,7 @@ async function performBulkOptOut(tabId) {
 
     return { success: true };
   } catch (e) {
+    console.error("performBulkOptOut error:", e);
     return { success: false, error: e.message };
   }
 }
@@ -200,6 +209,8 @@ async function performBulkOptOut(tabId) {
 chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
   (async () => {
     await loadState();
+
+    console.log("Received message:", msg);
 
     if (msg.type === "CLEAN_NOW") {
       const res = await cleanCookies();
@@ -236,7 +247,11 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
     }
 
     if (msg.type === "ADD_WHITELIST") {
-      const domain = msg.domain.trim();
+      const domain = msg.domain.trim().toLowerCase();
+      if (blacklist.includes(domain)) {
+        sendResponse({ whitelist, error: "Domain is already in blacklist!" });
+        return;
+      }
       if (validateDomain(domain) && !whitelist.includes(domain)) {
         whitelist.push(domain);
         saveLists();
@@ -246,14 +261,18 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
     }
 
     if (msg.type === "REMOVE_WHITELIST") {
-      whitelist = whitelist.filter(d => d !== msg.domain);
+      whitelist = whitelist.filter(d => d !== msg.domain.toLowerCase());
       saveLists();
       sendResponse({ whitelist });
       return;
     }
 
     if (msg.type === "ADD_BLACKLIST") {
-      const domain = msg.domain.trim();
+      const domain = msg.domain.trim().toLowerCase();
+      if (whitelist.includes(domain)) {
+        sendResponse({ blacklist, error: "Domain is already in whitelist!" });
+        return;
+      }
       if (validateDomain(domain) && !blacklist.includes(domain)) {
         blacklist.push(domain);
         saveLists();
@@ -263,21 +282,20 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
     }
 
     if (msg.type === "REMOVE_BLACKLIST") {
-      blacklist = blacklist.filter(d => d !== msg.domain);
+      blacklist = blacklist.filter(d => d !== msg.domain.toLowerCase());
       saveLists();
       sendResponse({ blacklist });
       return;
     }
 
-    // Placeholder for upgrade (real: integrate payments)
     if (msg.type === "UPGRADE_PREMIUM") {
-      state.isPremium = true;  // Test: Set to true
-      // Real: Use chrome.payments or webstore API here
+      state.isPremium = true;
       saveState();
       sendResponse({ state });
       return;
     }
 
+    console.error("Unknown message type:", msg.type);
     sendResponse({ error: "Unknown message type" });
   })();
 

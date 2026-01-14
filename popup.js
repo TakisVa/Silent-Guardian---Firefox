@@ -4,12 +4,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const lastCleanEl = $("lastClean");
   const cookiesClearedEl = $("cookiesCleared");
   const statusEl = $("status");
-  const premiumStatusEl = $("premiumStatus");  // New
-  const upgradeBtn = $("upgradeBtn");  // New
+  const premiumStatusEl = $("premiumStatus");
+  const upgradeBtn = $("upgradeBtn");
 
   const cleanBtn = $("cleanNow");
   const smartBtn = $("smartProtection");
   const bulkBtn = $("bulkOptOut");
+
+  const addWhitelistBtn = $("addWhitelist");
+  const addBlacklistBtn = $("addBlacklist");
 
   function formatDate(ts) {
     if (!ts) return "Never";
@@ -38,25 +41,20 @@ document.addEventListener("DOMContentLoaded", () => {
   async function refresh() {
     try {
       const data = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+      console.log("Refresh data:", data);  // Debug
       if (!data || !data.state) return;
 
       if (lastCleanEl) lastCleanEl.textContent = formatDate(data.state.lastClean);
       if (cookiesClearedEl) cookiesClearedEl.textContent = data.state.cookiesCleared ?? 0;
       setStatus(!!data.state.active, !!data.state.isPremium);
 
-      // Premium UI
       if (premiumStatusEl) {
         premiumStatusEl.textContent = data.state.isPremium ? "Premium Active" : "Free Version";
       }
 
       if (bulkBtn) {
-        if (!data.state.isPremium) {
-          bulkBtn.disabled = true;
-          bulkBtn.title = "Premium Feature - Upgrade required";
-        } else {
-          bulkBtn.disabled = false;
-          bulkBtn.title = "";
-        }
+        bulkBtn.disabled = !data.state.isPremium;
+        bulkBtn.title = data.state.isPremium ? "" : "Premium Feature - Upgrade required";
       }
 
       if (data.state.lastError) {
@@ -71,103 +69,99 @@ document.addEventListener("DOMContentLoaded", () => {
   async function act(type) {
     try {
       const res = await chrome.runtime.sendMessage({ type });
-      if (res.error) alert(`Action failed: ${res.error}`);
+      console.log(`Action ${type} response:`, res);  // Debug
+      if (res.error) {
+        alert(`Action failed: ${res.error}`);
+      }
     } catch (e) {
       alert(`Action failed: ${e.message}`);
     }
     await refresh();
   }
 
+  // Action buttons
   cleanBtn?.addEventListener("click", () => act("CLEAN_NOW"));
   smartBtn?.addEventListener("click", () => act("SMART_PROTECTION"));
   bulkBtn?.addEventListener("click", () => act("BULK_OPT_OUT"));
-  upgradeBtn?.addEventListener("click", () => act("UPGRADE_PREMIUM"));  // New
+  upgradeBtn?.addEventListener("click", () => act("UPGRADE_PREMIUM"));
 
-  refresh();
+  // Add buttons with logs
+  addWhitelistBtn?.addEventListener("click", async () => {
+  const input = $("whitelistInput");
+  const domain = input?.value.trim();
+  if (!domain) return;
+
+  console.log("Sending ADD_WHITELIST for:", domain);
+  const res = await chrome.runtime.sendMessage({ type: "ADD_WHITELIST", domain });
+  console.log("Response:", res);
+  if (res.error) {
+    alert(res.error);  // Π.χ. "Domain is already in blacklist!"
+  }
+  input.value = "";
+  refreshLists();
 });
 
-function safeById(id) {
-  return document.getElementById(id);
-}
+  addBlacklistBtn?.addEventListener("click", async () => {
+    const input = $("blacklistInput");
+    const domain = input?.value.trim();
+    if (!domain) return;
 
-async function refreshLists() {
-  const res = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+    console.log("Sending ADD_BLACKLIST for:", domain);
+    const res = await chrome.runtime.sendMessage({ type: "ADD_BLACKLIST", domain });
+    console.log("Response:", res);
+  if (res.error) {
+    alert(res.error);  // Π.χ. "Domain is already in blacklist!"
+  }
+  input.value = "";
+  refreshLists();
+});
 
-  const wl = safeById("whitelistList");
-  const bl = safeById("blacklistList");
+  async function refreshLists() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+      console.log("refreshLists data:", res);
 
-  if (!wl || !bl) return;
+      const wl = $("whitelistList");
+      const bl = $("blacklistList");
 
-  wl.innerHTML = "";
-  bl.innerHTML = "";
+      if (!wl || !bl) return;
 
-  (res.whitelist || []).forEach(d => {
-    const li = document.createElement("li");
-    li.textContent = d;
-    li.style.cursor = "pointer";
-    li.title = "Click to remove";
+      wl.innerHTML = "";
+      bl.innerHTML = "";
 
-    li.onclick = async () => {
-      await chrome.runtime.sendMessage({
-        type: "REMOVE_WHITELIST",
-        domain: d
+      (res.whitelist || []).forEach(d => {
+        const li = document.createElement("li");
+        li.textContent = d;
+        li.style.cursor = "pointer";
+        li.title = "Click to remove";
+
+        li.onclick = async () => {
+          await chrome.runtime.sendMessage({ type: "REMOVE_WHITELIST", domain: d });
+          refreshLists();
+        };
+
+        wl.appendChild(li);
       });
-      refreshLists();
-    };
 
-    wl.appendChild(li);
-  });
+      (res.blacklist || []).forEach(d => {
+        const li = document.createElement("li");
+        li.textContent = d;
+        li.style.cursor = "pointer";
+        li.title = "Click to remove";
 
-  (res.blacklist || []).forEach(d => {
-    const li = document.createElement("li");
-    li.textContent = d;
-    li.style.cursor = "pointer";
-    li.title = "Click to remove";
+        li.onclick = async () => {
+          await chrome.runtime.sendMessage({ type: "REMOVE_BLACKLIST", domain: d });
+          refreshLists();
+        };
 
-    li.onclick = async () => {
-      await chrome.runtime.sendMessage({
-        type: "REMOVE_BLACKLIST",
-        domain: d
+        bl.appendChild(li);
       });
-      refreshLists();
-    };
+    } catch (e) {
+      console.error("refreshLists error:", e);
+    }
+  }
 
-    bl.appendChild(li);
-  });
-}
-
-// ---- SAFE EVENT BINDINGS ----
-const addWhitelistBtn = safeById("addWhitelist");
-const addBlacklistBtn = safeById("addBlacklist");
-
-if (addWhitelistBtn) {
-  addWhitelistBtn.addEventListener("click", async () => {
-    const input = safeById("whitelistInput");
-    if (!input || !input.value.trim()) return;
-
-    await chrome.runtime.sendMessage({
-      type: "ADD_WHITELIST",
-      domain: input.value.trim()
-    });
-
-    input.value = "";
-    refreshLists();
-  });
-}
-
-if (addBlacklistBtn) {
-  addBlacklistBtn.addEventListener("click", async () => {
-    const input = safeById("blacklistInput");
-    if (!input || !input.value.trim()) return;
-
-    await chrome.runtime.sendMessage({
-      type: "ADD_BLACKLIST",
-      domain: input.value.trim()
-    });
-
-    input.value = "";
-    refreshLists();
-  });
-}
-
-refreshLists();
+  // Initial calls
+  refresh();
+  refreshLists();
+});
