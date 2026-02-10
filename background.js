@@ -3,8 +3,7 @@ let state = {
   cookiesCleared: 0,
   lastClean: null,
   lastError: null,
-  active: false,
-  isPremium: false
+  active: false
 };
 
 let whitelist = [];
@@ -20,11 +19,6 @@ async function loadConfigs() {
     const categories = await response.json();
     const freeBlacklist = [...(categories.free.ads || []), ...(categories.free.tracking || [])];
     blacklist = [...new Set([...blacklist, ...freeBlacklist])];
-
-    if (state.isPremium) {
-      const premiumBlacklist = [...(categories.premium.trackers || []), ...(categories.premium.analytics || [])];
-      blacklist = [...new Set([...blacklist, ...premiumBlacklist])];
-    }
   } catch (e) {
     console.error("Config load error:", e);
   }
@@ -34,8 +28,6 @@ async function loadConfigs() {
 async function loadState() {
   try {
     const storedData = await chrome.storage.local.get(["state", "whitelist", "blacklist"]);
-    console.log("Loaded storage data:", storedData);
-
     const data = storedData || {};
 
     if (data.state) state = data.state;
@@ -51,41 +43,32 @@ async function loadState() {
 }
 
 function saveState() {
-  chrome.storage.local.set({ state }).catch(e => console.error("Save state error:", e));
+  chrome.storage.local.set({ state });
 }
 
 function saveLists() {
-  chrome.storage.local.set({ whitelist, blacklist }).catch(e => console.error("Save lists error:", e));
+  chrome.storage.local.set({ whitelist, blacklist });
 }
 
 // ---------- VALIDATION ----------
 function validateDomain(domain) {
   domain = domain.toLowerCase();
-  const tldRegex = /\.(com|net|org|io|co|uk|de|fr|gr|eu|app|site|ai|dev|biz|info)$/i;  // Expanded TLDs
-  const isValid = /^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(domain) && tldRegex.test(domain) && domain !== 'localhost';
-  console.log("Validate domain:", domain, "Result:", isValid);
-  return isValid;
+  const tldRegex = /\.(com|net|org|io|co|uk|de|fr|gr|eu|app|site|ai|dev|biz|info|me|tv)$/i;
+  return /^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(domain) && tldRegex.test(domain) && domain !== 'localhost';
 }
 
 // ---------- CLEAN LOGIC ----------
 async function cleanCookies() {
-  console.log("Starting cleanCookies...");
   try {
     const cookies = await chrome.cookies.getAll({});
-    console.log("Fetched cookies:", cookies.length);
-
     let removed = 0;
 
     for (const cookie of cookies) {
       let shouldDelete = false;
-
       const domain = cookie.domain.replace(/^\./, "").toLowerCase();
 
       if (whitelist.some(w => domain.endsWith(w))) continue;
-
-      if (blacklist.some(b => domain.endsWith(b))) {
-        shouldDelete = true;
-      }
+      if (blacklist.some(b => domain.endsWith(b))) shouldDelete = true;
 
       if (!shouldDelete) {
         if (cookie.hostOnly) continue;
@@ -93,23 +76,14 @@ async function cleanCookies() {
 
         const nameLower = cookie.name.toLowerCase();
         if (
-          nameLower.includes("sess") ||
-          nameLower.includes("auth") ||
-          nameLower.includes("token") ||
-          nameLower.includes("sid") ||
-          nameLower.includes("login") ||
-          nameLower.includes("cart") ||
-          nameLower.includes("pref") ||
-          nameLower.includes("locale") ||
+          nameLower.includes("sess") || nameLower.includes("auth") ||
+          nameLower.includes("token") || nameLower.includes("sid") ||
+          nameLower.includes("login") || nameLower.includes("cart") ||
+          nameLower.includes("pref") || nameLower.includes("locale") ||
           nameLower.includes("user_id")
         ) {
           continue;
         }
-
-        if (state.isPremium && cookie.value.match(/^[a-f0-9-]{36}$/i)) {
-          shouldDelete = true;
-        }
-
         shouldDelete = true;
       }
 
@@ -120,18 +94,12 @@ async function cleanCookies() {
       try {
         await chrome.cookies.remove({ url, name: cookie.name });
         removed++;
-        console.log("Removed cookie:", cookie.name, "from", domain);
-      } catch (e) {
-        console.error("Remove error for", cookie.name, ":", e);
-      }
+      } catch (_) {}
     }
 
     if (removed > 0) {
       state.cookiesCleared += removed;
       state.lastClean = Date.now();
-      // Remove notification - keep silent
-    } else {
-      console.log("No cookies removed.");
     }
 
     state.lastError = null;
@@ -139,7 +107,6 @@ async function cleanCookies() {
 
     return { success: true, removed };
   } catch (e) {
-    console.error("cleanCookies error:", e);
     state.lastError = e.message || "Unknown error";
     saveState();
     return { success: false, error: state.lastError };
@@ -153,54 +120,77 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
-// ---------- OPT-OUT LOGIC ----------
+// ---------- OPT-OUT LOGIC (ΝΕΑ ΒΕΛΤΙΩΜΕΝΗ ΕΚΔΟΣΗ) ----------
 async function performBulkOptOut(tabId) {
-  console.log("Starting performBulkOptOut for tab:", tabId);  // Debug
+  console.log("Bulk Opt-Out started on tab:", tabId);
+
   try {
+    // Φορτώνουμε τα configs
     const cmpResponse = await fetch(chrome.runtime.getURL('config/cmp-selectors.json'));
     const cmps = await cmpResponse.json();
-    let rejectSelector = cmps.genericCMP.rejectButtonSelector || '.cmp-reject-all';
 
-    if (state.isPremium) {
-      const vendorsResponse = await fetch(chrome.runtime.getURL('config/iab-vendors.json'));
-      const vendors = await vendorsResponse.json();
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (vendorsList, rejectSel) => {
-          vendorsList.forEach(v => {
-            if (v.purposes.includes('advertising')) {
-              const checkbox = document.querySelector(`[data-vendor="${v.id}"] input[type="checkbox"]`);
-              if (checkbox && checkbox.checked) checkbox.click();
+    const vendorsResponse = await fetch(chrome.runtime.getURL('config/iab-vendors.json'));
+    const vendors = await vendorsResponse.json();
+
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (vendorsList, selectors) => {
+        let clicked = false;
+
+        // 1. Μαζικό Uncheck όλων των non-necessary vendors
+        vendorsList.forEach(v => {
+          // Αν δεν είναι Strictly Necessary → uncheck
+          if (!v.purposes.includes("strictly_necessary") && 
+              !v.purposes.includes("essential")) {
+            
+            // Δοκιμάζουμε διάφορα πιθανά selectors για checkboxes
+            const possibleSelectors = [
+              `[data-vendor-id="${v.id}"] input[type="checkbox"]`,
+              `[data-vendor="${v.id}"] input`,
+              `input[name="vendor-${v.id}"]`,
+              `input[id*="${v.id}"]`
+            ];
+
+            for (const sel of possibleSelectors) {
+              const checkbox = document.querySelector(sel);
+              if (checkbox && checkbox.checked) {
+                checkbox.click();
+                clicked = true;
+                break;
+              }
             }
-          });
-          const saveBtn = document.querySelector('.cmp-save');
-          if (saveBtn) saveBtn.click();
-          const rejectBtn = document.querySelector(rejectSel);
-          if (rejectBtn) rejectBtn.click();
-        },
-        args: [vendors, rejectSelector]
-      });
-    } else {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (selector) => {
-          const btn = document.querySelector(selector);
-          if (btn) btn.click();
-        },
-        args: [rejectSelector]
-      });
-    }
+          }
+        });
 
-    chrome.notifications.create({
-      type: 'basic',
-      iconUrl: 'icons/icon48.png',
-      title: 'Silent Guardian',
-      message: 'Opted out from trackers!'
+        // 2. Πατάμε "Save" / "Confirm" button
+        const saveSelectors = [
+          '.save-preferences-btn', '.save-button', '.confirm-btn',
+          '[aria-label="Save"]', '.ot-pc-save', '.cmp-save',
+          'button:has-text("Save")', 'button:has-text("Confirm")'
+        ];
+
+        for (const sel of saveSelectors) {
+          const btn = document.querySelector(sel);
+          if (btn) {
+            btn.click();
+            clicked = true;
+            break;
+          }
+        }
+
+        // 3. Fallback → Reject All (μόνο αν δεν βρήκε τίποτα)
+        if (!clicked) {
+          const rejectBtn = document.querySelector(selectors.genericCMP.rejectButtonSelector);
+          if (rejectBtn) rejectBtn.click();
+        }
+      },
+      args: [vendors, cmps]
     });
 
-    return { success: true };
+    return { success: true, message: "Bulk opt-out attempted" };
+
   } catch (e) {
-    console.error("performBulkOptOut error:", e);
+    console.error("Bulk Opt-Out error:", e);
     return { success: false, error: e.message };
   }
 }
@@ -209,8 +199,6 @@ async function performBulkOptOut(tabId) {
 chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
   (async () => {
     await loadState();
-
-    console.log("Received message:", msg);
 
     if (msg.type === "CLEAN_NOW") {
       const res = await cleanCookies();
@@ -246,10 +234,11 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
       return;
     }
 
+    // === ADD & REMOVE με προστασία σύγκρουσης ===
     if (msg.type === "ADD_WHITELIST") {
-      const domain = msg.domain.trim().toLowerCase();
+      let domain = msg.domain.trim().toLowerCase();
       if (blacklist.includes(domain)) {
-        sendResponse({ whitelist, error: "Domain is already in blacklist!" });
+        sendResponse({ error: "This domain is already in Blacklist!" });
         return;
       }
       if (validateDomain(domain) && !whitelist.includes(domain)) {
@@ -260,17 +249,10 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
       return;
     }
 
-    if (msg.type === "REMOVE_WHITELIST") {
-      whitelist = whitelist.filter(d => d !== msg.domain.toLowerCase());
-      saveLists();
-      sendResponse({ whitelist });
-      return;
-    }
-
     if (msg.type === "ADD_BLACKLIST") {
-      const domain = msg.domain.trim().toLowerCase();
+      let domain = msg.domain.trim().toLowerCase();
       if (whitelist.includes(domain)) {
-        sendResponse({ blacklist, error: "Domain is already in whitelist!" });
+        sendResponse({ error: "This domain is already in Whitelist!" });
         return;
       }
       if (validateDomain(domain) && !blacklist.includes(domain)) {
@@ -281,6 +263,13 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
       return;
     }
 
+    if (msg.type === "REMOVE_WHITELIST") {
+      whitelist = whitelist.filter(d => d !== msg.domain.toLowerCase());
+      saveLists();
+      sendResponse({ whitelist });
+      return;
+    }
+
     if (msg.type === "REMOVE_BLACKLIST") {
       blacklist = blacklist.filter(d => d !== msg.domain.toLowerCase());
       saveLists();
@@ -288,14 +277,6 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
       return;
     }
 
-    if (msg.type === "UPGRADE_PREMIUM") {
-      state.isPremium = true;
-      saveState();
-      sendResponse({ state });
-      return;
-    }
-
-    console.error("Unknown message type:", msg.type);
     sendResponse({ error: "Unknown message type" });
   })();
 

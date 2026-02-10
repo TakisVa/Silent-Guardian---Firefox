@@ -1,5 +1,26 @@
 {
   "genericCMP": {
-    "rejectButtonSelector": ".ot-pc-refuse-all-handler, .cmp-reject-all, #reject-cookies"
-  }
+    "rejectButtonSelector": ".ot-pc-refuse-all-handler, .cmp-reject-all, #onetrust-reject-all-handler, .reject-all, .cookie-reject-all, .truste-reject-all, .save-preferences-btn"
+  },
+  "oneTrust": {
+    "rejectButtonSelector": ".ot-pc-refuse-all-handler, #onetrust-reject-all-handler",
+    "saveButtonSelector": ".save-preferences-btn, .ot-pc-save"
+  },
+  "cookiebot": {
+    "rejectButtonSelector": "#CybotCookiebotDialogBodyLevelButtonLevelOptinDeclineAll",
+    "saveButtonSelector": "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowallSelection"
+  },
+  "trustArc": {
+    "rejectButtonSelector": ".truste-reject-all, .rejectAll",
+    "saveButtonSelector": ".save"
+  },
+  "termly": {
+    "rejectButtonSelector": "[data-testid='reject-all']",
+    "saveButtonSelector": "[data-testid='save']"
+  },
+  "commonSaveButtons": [
+    ".save-preferences-btn", ".save-button", ".confirm-btn", 
+    ".ot-pc-save", ".cmp-save", "button:has-text('Save')", 
+    "button:has-text('Confirm')", "[aria-label='Save preferences']"
+  ]
 }
