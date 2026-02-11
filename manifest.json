@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Silent Guardian",
+  "name": "Silent Guardian — Privacy & Cookie Cleaner",
   "version": "1.0.0",
-  "description": "Automatically cleans unwanted cookies and rejects trackers while keeping useful ones. Free + Premium features.",
+  "description": "Automatically clean tracking cookies and bulk opt-out from vendors. Protect your privacy silently and effectively.",
   "permissions": [
     "cookies",
     "storage",
