@@ -1,17 +1,13 @@
 document.addEventListener("DOMContentLoaded", () => {
   const $ = (id) => document.getElementById(id);
 
-  // Elements
-  const lastCleanEl       = $("lastClean");
-  const cookiesClearedEl  = $("cookiesCleared");
-  const statusEl          = $("status");
+  const lastCleanEl      = $("lastClean");
+  const cookiesClearedEl = $("cookiesCleared");
+  const statusEl         = $("status");
 
-  const cleanBtn    = $("cleanNow");
-  const smartBtn    = $("smartProtection");
-  const bulkBtn     = $("bulkOptOut");
-
-  const addWhitelistBtn = $("addWhitelist");
-  const addBlacklistBtn = $("addBlacklist");
+  const cleanBtn = $("cleanNow");
+  const smartBtn = $("smartProtection");
+  const bulkBtn  = $("bulkOptOut");
 
   function formatDate(ts) {
     if (!ts) return "Never";
@@ -52,97 +48,71 @@ document.addEventListener("DOMContentLoaded", () => {
     await refresh();
   }
 
-  // Action Buttons
   cleanBtn?.addEventListener("click", () => act("CLEAN_NOW"));
   smartBtn?.addEventListener("click", () => act("SMART_PROTECTION"));
   bulkBtn?.addEventListener("click", () => act("BULK_OPT_OUT"));
 
-  // === ADD BUTTONS (τώρα σωστά μέσα στο DOMContentLoaded) ===
- // Add Whitelist
-if (addWhitelistBtn) {
-  addWhitelistBtn.addEventListener("click", async () => {
-    const input = $("whitelistInput");
-    const domain = input?.value.trim();
-    if (!domain) {
-      alert("Please enter a domain");
-      return;
-    }
+  // Whitelist & Blacklist
+  function safeById(id) { return document.getElementById(id); }
 
-    const res = await chrome.runtime.sendMessage({ type: "ADD_WHITELIST", domain });
-    
-    if (res.error) {
-      alert(res.error);                    // ← Εδώ εμφανίζει το μήνυμα
-    } else {
-      input.value = "";
-      refreshLists();
-    }
-  });
-}
-
-// Add Blacklist
-if (addBlacklistBtn) {
-  addBlacklistBtn.addEventListener("click", async () => {
-    const input = $("blacklistInput");
-    const domain = input?.value.trim();
-    if (!domain) {
-      alert("Please enter a domain");
-      return;
-    }
-
-    const res = await chrome.runtime.sendMessage({ type: "ADD_BLACKLIST", domain });
-    
-    if (res.error) {
-      alert(res.error);                    // ← Εδώ εμφανίζει το μήνυμα
-    } else {
-      input.value = "";
-      refreshLists();
-    }
-  });
-}
-
-  // Refresh Lists
   async function refreshLists() {
-    try {
-      const res = await chrome.runtime.sendMessage({ type: "GET_STATE" });
-      console.log("refreshLists data:", res);
+    const res = await chrome.runtime.sendMessage({ type: "GET_STATE" });
 
-      const wl = $("whitelistList");
-      const bl = $("blacklistList");
+    const wl = safeById("whitelistList");
+    const bl = safeById("blacklistList");
 
-      if (!wl || !bl) return;
+    if (!wl || !bl) return;
 
-      wl.innerHTML = "";
-      bl.innerHTML = "";
+    wl.innerHTML = bl.innerHTML = "";
 
-      (res.whitelist || []).forEach(d => {
-        const li = document.createElement("li");
-        li.textContent = d;
-        li.style.cursor = "pointer";
-        li.title = "Click to remove";
-        li.onclick = async () => {
-          await chrome.runtime.sendMessage({ type: "REMOVE_WHITELIST", domain: d });
-          refreshLists();
-        };
-        wl.appendChild(li);
-      });
+    (res.whitelist || []).forEach(d => {
+      const li = document.createElement("li");
+      li.textContent = d;
+      li.style.cursor = "pointer";
+      li.onclick = async () => {
+        await chrome.runtime.sendMessage({ type: "REMOVE_WHITELIST", domain: d });
+        refreshLists();
+      };
+      wl.appendChild(li);
+    });
 
-      (res.blacklist || []).forEach(d => {
-        const li = document.createElement("li");
-        li.textContent = d;
-        li.style.cursor = "pointer";
-        li.title = "Click to remove";
-        li.onclick = async () => {
-          await chrome.runtime.sendMessage({ type: "REMOVE_BLACKLIST", domain: d });
-          refreshLists();
-        };
-        bl.appendChild(li);
-      });
-    } catch (e) {
-      console.error("refreshLists error:", e);
-    }
+    (res.blacklist || []).forEach(d => {
+      const li = document.createElement("li");
+      li.textContent = d;
+      li.style.cursor = "pointer";
+      li.onclick = async () => {
+        await chrome.runtime.sendMessage({ type: "REMOVE_BLACKLIST", domain: d });
+        refreshLists();
+      };
+      bl.appendChild(li);
+    });
   }
 
-  // Initial load
+  const addWhitelistBtn = safeById("addWhitelist");
+  const addBlacklistBtn = safeById("addBlacklist");
+
+  if (addWhitelistBtn) {
+    addWhitelistBtn.addEventListener("click", async () => {
+      const input = safeById("whitelistInput");
+      const domain = input?.value.trim();
+      if (!domain) return;
+      await chrome.runtime.sendMessage({ type: "ADD_WHITELIST", domain });
+      input.value = "";
+      refreshLists();
+    });
+  }
+
+  if (addBlacklistBtn) {
+    addBlacklistBtn.addEventListener("click", async () => {
+      const input = safeById("blacklistInput");
+      const domain = input?.value.trim();
+      if (!domain) return;
+      await chrome.runtime.sendMessage({ type: "ADD_BLACKLIST", domain });
+      input.value = "";
+      refreshLists();
+    });
+  }
+
   refresh();
   refreshLists();
 });
