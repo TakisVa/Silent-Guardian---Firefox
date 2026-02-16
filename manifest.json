@@ -16,6 +16,8 @@
     "<all_urls>"
   ],
 
+  "data_collection_permissions": [],
+
   "browser_specific_settings": {
     "gecko": {
       "id": "silent-guardian@privacy.com"
