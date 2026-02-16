@@ -11,6 +11,22 @@ let blacklist = [];
 
 const defaultWhitelist = ['google.com', 'amazon.com', 'facebook.com', 'hubspot.com'];
 
+// === FIREFOX KEEP-ALIVE (Πιο επιθετικό) ===
+setInterval(() => {
+  // Απλό heartbeat
+  chrome.runtime.sendMessage({ type: "KEEP_ALIVE" }, () => {});
+}, 15000); // κάθε 15 δευτερόλεπτα
+
+// Επιπλέον: Δημιουργούμε περιοδικό alarm για να ξυπνάμε το background
+chrome.alarms.create("firefoxKeepAlive", { periodInMinutes: 0.5 }); // κάθε 30 δευτερόλεπτα
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "firefoxKeepAlive") {
+    // Απλά για να κρατάμε το background ζωντανό
+    console.log("Firefox keep-alive alarm triggered");
+  }
+});
+
 // ---------- CONFIG LOADING ----------
 async function loadConfigs() {
   try {
@@ -26,10 +42,21 @@ async function loadConfigs() {
 // ---------- STORAGE ----------
 async function loadState() {
   try {
-    const data = await chrome.storage.local.get(["state", "whitelist", "blacklist"]);
+    const storedData = await chrome.storage.local.get(["state", "whitelist", "blacklist"]);
+    const data = storedData || {};
+
     if (data.state) state = data.state;
-    whitelist = data.whitelist || [...defaultWhitelist];
+
+    // ←←← ΑΥΤΗ ΕΙΝΑΙ Η ΔΙΟΡΘΩΣΗ ←←←
+    // Βάζουμε τα defaults ΜΟΝΟ την ΠΡΩΤΗ φορά
+    if (!data.whitelist) {
+      whitelist = [...defaultWhitelist];
+    } else {
+      whitelist = data.whitelist;
+    }
+
     blacklist = data.blacklist || [];
+
     await loadConfigs();
   } catch (e) {
     console.error("Storage load error:", e);
@@ -104,73 +131,15 @@ async function cleanCookies() {
   }
 }
 
-// ---------- ALARMS ----------
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === 'periodicClean' && state.active) {
-    await cleanCookies();
-  }
-});
-
-// ---------- OPT-OUT LOGIC ----------
-async function performBulkOptOut(tabId) {
-  try {
-    const cmpResponse = await fetch(chrome.runtime.getURL('config/cmp-selectors.json'));
-    const cmps = await cmpResponse.json();
-
-    const vendorsResponse = await fetch(chrome.runtime.getURL('config/iab-vendors.json'));
-    const vendors = await vendorsResponse.json();
-
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (vendorsList, selectors) => {
-        let clicked = false;
-
-        vendorsList.forEach(v => {
-          if (!v.purposes.includes("strictly_necessary")) {
-            const selectorsToTry = [
-              `[data-vendor-id="${v.id}"] input[type="checkbox"]`,
-              `input[data-vendor="${v.id}"]`,
-              `input[name*="${v.id}"]`
-            ];
-            for (const sel of selectorsToTry) {
-              const el = document.querySelector(sel);
-              if (el && el.checked) {
-                el.click();
-                clicked = true;
-                break;
-              }
-            }
-          }
-        });
-
-        const saveSelectors = selectors.commonSaveButtons || [".save-preferences-btn", ".ot-pc-save", ".cmp-save"];
-        for (const sel of saveSelectors) {
-          const btn = document.querySelector(sel);
-          if (btn) {
-            btn.click();
-            clicked = true;
-            break;
-          }
-        }
-
-        if (!clicked) {
-          const rejectBtn = document.querySelector(selectors.genericCMP.rejectButtonSelector);
-          if (rejectBtn) rejectBtn.click();
-        }
-      },
-      args: [vendors, cmps]
-    });
-
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-}
-
 // ---------- MESSAGING ----------
 chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
   (async () => {
     await loadState();
+
+    if (msg.type === "KEEP_ALIVE") {
+      sendResponse({ status: "alive" });
+      return;
+    }
 
     if (msg.type === "CLEAN_NOW") {
       const res = await cleanCookies();
@@ -185,8 +154,11 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
 
     if (msg.type === "SMART_PROTECTION") {
       state.active = !state.active;
-      if (state.active) chrome.alarms.create('periodicClean', { periodInMinutes: 30 });
-      else chrome.alarms.clear('periodicClean');
+      if (state.active) {
+        chrome.alarms.create('periodicClean', { periodInMinutes: 30 });
+      } else {
+        chrome.alarms.clear('periodicClean');
+      }
       saveState();
       sendResponse({ state });
       return;
@@ -203,7 +175,7 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
       return;
     }
 
-    // Add / Remove handlers (ίδιοι με Chrome)
+    // Add / Remove handlers
     if (msg.type === "ADD_WHITELIST") {
       let domain = msg.domain.trim().toLowerCase();
       if (blacklist.includes(domain)) {
@@ -218,7 +190,33 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
       return;
     }
 
-    // ... (τα υπόλοιπα ADD/REMOVE ίδια όπως στο Chrome)
+    if (msg.type === "ADD_BLACKLIST") {
+      let domain = msg.domain.trim().toLowerCase();
+      if (whitelist.includes(domain)) {
+        sendResponse({ error: "This domain is already in Whitelist!" });
+        return;
+      }
+      if (validateDomain(domain) && !blacklist.includes(domain)) {
+        blacklist.push(domain);
+        saveLists();
+      }
+      sendResponse({ blacklist });
+      return;
+    }
+
+    if (msg.type === "REMOVE_WHITELIST") {
+      whitelist = whitelist.filter(d => d !== msg.domain.toLowerCase());
+      saveLists();
+      sendResponse({ whitelist });
+      return;
+    }
+
+    if (msg.type === "REMOVE_BLACKLIST") {
+      blacklist = blacklist.filter(d => d !== msg.domain.toLowerCase());
+      saveLists();
+      sendResponse({ blacklist });
+      return;
+    }
 
     sendResponse({ error: "Unknown message type" });
   })();
